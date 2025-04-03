@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package gophkeeper;
+
+option go_package = "gophkeeper/proto";
+
+message Hello {
+  string name = 1;
+}
+
+message HelloResponse {
+  string response = 1;
+}
+
+message Credentials {
+  string login = 1;
+  string password = 2;
+}
+
+message Token {
+  string token =1;
+}
+
+message None{}
+
+service Gophkeeper {
+  rpc CheckConnection(Hello) returns (HelloResponse);
+  rpc Register(Credentials) returns (Token);
+  rpc Login(Credentials) returns (Token);
+} 
