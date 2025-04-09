@@ -32,3 +32,13 @@ func GRPCLogInterceptor(
 	Log.Infof("gRPC request to method: %s", info.FullMethod)
 	return handler(ctx, req)
 }
+
+func GRPCStreamLogInterceptor(
+    srv interface{},
+    ss grpc.ServerStream,
+    info *grpc.StreamServerInfo,
+    handler grpc.StreamHandler,
+) error {
+	Log.Infof("gRPC request to method: %s", info.FullMethod)
+	return handler(srv, ss)
+}

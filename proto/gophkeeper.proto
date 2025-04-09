@@ -17,14 +17,55 @@ message Credentials {
   string password = 2;
 }
 
-message Token {
+message TokenResponse {
   string token =1;
+}
+
+message SaveCredsRequest {
+  string marking =1;
+  Credentials creds =2;
+  string password =3;  
+  string metainfo =4;
+}
+
+message GetCredsRequest {
+  string password =1;  
+}
+
+message UserCredsResponse {
+  message ResponseItem {
+    string marking =1;
+    Credentials creds =2;
+    string metainfo =3;
+  }
+  repeated ResponseItem items =1;
+}
+
+message UploadRequest {
+  oneof data {
+    FileMetadata metadata = 1;  // Первым сообщением отправляем метаданные
+    bytes chunk = 2;            // Последующие сообщения - бинарные чанки
+  }
+}
+
+message FileMetadata {
+  string filename = 1;
+  string metainfo =2;
+}
+
+message UploadResponse {
+  string status = 1;
+  int64 size = 2;
+  string file_id = 3;
 }
 
 message None{}
 
 service Gophkeeper {
   rpc CheckConnection(Hello) returns (HelloResponse);
-  rpc Register(Credentials) returns (Token);
-  rpc Login(Credentials) returns (Token);
+  rpc Register(Credentials) returns (TokenResponse);
+  rpc Login(Credentials) returns (TokenResponse);
+  rpc SaveCredentials(SaveCredsRequest) returns (None);
+  rpc GetUserAllCredentials(GetCredsRequest) returns (UserCredsResponse);
+  rpc UploadBigData(stream UploadRequest) returns (UploadResponse);
 } 

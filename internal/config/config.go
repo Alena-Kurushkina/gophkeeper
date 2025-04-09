@@ -38,9 +38,9 @@ func InitConfig() *Config {
 			rand.Read(key)
 			cfg.SecretKey = key
 
-			tokenKey:=make([]byte, 32) // 256-bit key
-			rand.Read(tokenKey)
-			cfg.TokenKey=string(tokenKey)
+			// tokenKey:=make([]byte, 32) // 256-bit key
+			// rand.Read(tokenKey)
+			// cfg.TokenKey=string(tokenKey)
 
 			// get flag values
 			flag.StringVar(&cfg.ServerAddress, "a", ":50051", "address of HTTP server")
@@ -83,7 +83,7 @@ func InitConfig() *Config {
 
 			tu, exists := os.LookupEnv("GOPHKEEPER_TOKEN_KEY")
 			if exists {
-				cfg.SecretKey = []byte(tu)
+				cfg.TokenKey = tu
 			}
 		})
 	return cfg

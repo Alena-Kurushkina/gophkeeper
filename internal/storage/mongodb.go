@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -9,10 +10,10 @@ import (
 	"github.com/Alena-Kurushkina/gophkeeper/internal/config"
 	"github.com/Alena-Kurushkina/gophkeeper/internal/gopherror"
 	"github.com/Alena-Kurushkina/gophkeeper/internal/logger"
-	uuid "github.com/satori/go.uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -23,22 +24,23 @@ type Database struct {
 
 const (
 	collectionUsers = "users"
+	collectionCredentials = "credentials"
 )
 
-func MustCreate(cfg *config.Config) *Database {
-	ctx, cancel:= context.WithTimeout(context.Background(), 10*time.Second)
+func MustCreate(ctx context.Context, cfg *config.Config) *Database {
+	ctxTO, cancel:= context.WithTimeout(ctx, 10*time.Second)
 	//TODO: ???
 	defer cancel()
 
 	// Подключение к MongoDB
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.ConnectionStr))
+	client, err := mongo.Connect(ctxTO, options.Client().ApplyURI(cfg.ConnectionStr))
 	if err != nil {
 		logger.Log.Fatalf("Failed to connect to DB:",err)
 	}
 
 	db:=client.Database(cfg.DBName)
 
-	//TODO: in other function
+	//TODO: вынести в отдельную функцию
 	// create collections
 	colUsers:=db.Collection(collectionUsers)
 	indexModel := mongo.IndexModel{
@@ -50,6 +52,17 @@ func MustCreate(cfg *config.Config) *Database {
 		log.Fatal("Failed to create index:", err)
 	}
 
+	//TODO: нужно ли поле id
+	colCreds:=db.Collection(collectionCredentials)
+	indexModelCr := mongo.IndexModel{
+		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err = colCreds.Indexes().CreateOne(context.Background(), indexModelCr)
+	if err != nil {
+		log.Fatal("Failed to create index: ", err)
+	}
+
 
 	return &Database{
 		client: client,
@@ -57,16 +70,16 @@ func MustCreate(cfg *config.Config) *Database {
 	}
 }
 
-func (d *Database) Shutdown(){
-	d.client.Disconnect(context.TODO())
+func (d *Database) Shutdown(ctx context.Context){
+	d.client.Disconnect(ctx)
 }
 
-func(d *Database) AddUser(ctx context.Context, userID uuid.UUID, login string, hashedPassword string) error{
-	// Преобразование в Binary
-    binaryUUID := primitive.Binary{
-        Subtype: 0x04, // UUID subtype
-        Data:    userID[:],
-    }
+func(d *Database) AddUser(ctx context.Context, binaryUUID primitive.Binary, login string, hashedPassword string) error{
+	// // Преобразование в Binary
+    // binaryUUID := primitive.Binary{
+    //     Subtype: 0x04, // UUID subtype
+    //     Data:    userID[:],
+    // }
 
 	newUser := User{
 		Login:        login,
@@ -89,6 +102,94 @@ func(d *Database) AddUser(ctx context.Context, userID uuid.UUID, login string, h
 
 	return nil
 }
+
+func(d *Database) GetUserPassword(ctx context.Context, login string) (*User, error){
+	collection := d.database.Collection(collectionUsers)
+	user:=User{}
+	err:=collection.FindOne(ctx, bson.M{"login": login}).Decode(&user)
+	if err!=nil{
+		if errors.Is(err, mongo.ErrNoDocuments){
+			return nil, gopherror.ErrUnregisteredUser
+		}
+		return nil,err
+	}
+	if user.Login==""{
+		return nil, gopherror.ErrUnregisteredUser
+	}
+	return &user, nil
+}
+
+func(d *Database) SaveUserCredentials(
+	ctx context.Context, 
+	userID primitive.Binary, 
+	encrypted []byte, 
+	metaInfo string, 
+	marking string,
+) error {
+	collection := d.database.Collection(collectionCredentials)
+	doc:=CredentialsDocument{
+		UserID: userID,
+		Marking: marking,
+		MetaInfo: metaInfo,
+		Credentials: encrypted,
+	}
+	_, err := collection.InsertOne(ctx, doc)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return gopherror.ErrAlreadyExists
+		}
+		return fmt.Errorf("failed to add credentials: %w", err)
+	}
+	return nil
+}
+
+func(d *Database) GetUserCredentials(ctx context.Context, userID primitive.Binary) ([]CredentialsDocument, error){
+	collection := d.database.Collection(collectionCredentials)
+
+	filter := bson.M{"user_id": userID}
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var creds []CredentialsDocument
+	if err = cursor.All(context.TODO(), &creds); err != nil {
+		return nil, err
+	}
+
+	if len(creds)==0{
+		return nil, gopherror.ErrNoData
+	}
+
+	return creds, nil
+}
+
+func(d *Database) CreateGridFSStream(userID string, filename string, metainfo string) (*gridfs.UploadStream, error) {
+	// Подключаемся к GridFS
+	bucket, err := gridfs.NewBucket(
+		d.database,
+		options.GridFSBucket().SetName("files"),
+	)
+	if err != nil {
+		return nil,err
+	}
+
+	// Создаем файл в GridFS с метаданными пользователя
+	opts := options.GridFSUpload().
+		SetMetadata(bson.M{
+			"user_id":   userID,
+			"metainfo": metainfo,
+		})
+
+	uploadStream, err := bucket.OpenUploadStream(filename, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return uploadStream, nil
+}
+
 
 // Для binary UUID
 // uuidBytes := uuid.MustParse("a6bb8f0d-7e7a-4a9a-b88d-5b5e5b5e5b5e").Bytes()

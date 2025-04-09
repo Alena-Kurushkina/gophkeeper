@@ -21,3 +21,5 @@ mkcert -install
 mkcert localhost 127.0.0.1 ::1
 
 # add env var for cert path and cert key path
+
+mockgen -destination=internal/grpc/api/mock_store.go -source=internal/gophkeeper/core.go Storager
