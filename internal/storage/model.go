@@ -20,3 +20,12 @@ type CredentialsDocument struct {
 	MetaInfo    string           `bson:"metainfo"`
 }
 
+type FileInfo struct {
+	ID         primitive.ObjectID `bson:"_id"`
+	Length     int64              `bson:"length"`
+	UploadDate time.Time          `bson:"uploadDate"`
+	Metadata   struct {
+		UserID string `bson:"user_id"`
+		MetaInfo string `bson:"metainfo"`
+	} `bson:"metadata"`
+}

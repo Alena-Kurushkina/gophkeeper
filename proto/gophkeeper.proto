@@ -4,6 +4,7 @@ package gophkeeper;
 
 option go_package = "gophkeeper/proto";
 
+
 message Hello {
   string name = 1;
 }
@@ -24,12 +25,12 @@ message TokenResponse {
 message SaveCredsRequest {
   string marking =1;
   Credentials creds =2;
-  string password =3;  
+  string encrpassword =3;  
   string metainfo =4;
 }
 
 message GetCredsRequest {
-  string password =1;  
+  string password =1;
 }
 
 message UserCredsResponse {
@@ -41,16 +42,17 @@ message UserCredsResponse {
   repeated ResponseItem items =1;
 }
 
-message UploadRequest {
+message BigDataChunk {
   oneof data {
-    FileMetadata metadata = 1;  // Первым сообщением отправляем метаданные
-    bytes chunk = 2;            // Последующие сообщения - бинарные чанки
+    FileMetadata metadata = 1;
+    bytes chunk = 2;
   }
 }
 
 message FileMetadata {
   string filename = 1;
-  string metainfo =2;
+  string metainfo = 2;
+  int64 size = 3;
 }
 
 message UploadResponse {
@@ -59,13 +61,22 @@ message UploadResponse {
   string file_id = 3;
 }
 
+message DownloadRequest {
+  string filename = 1;  // Имя файла для скачивания
+}
+
 message None{}
 
 service Gophkeeper {
-  rpc CheckConnection(Hello) returns (HelloResponse);
   rpc Register(Credentials) returns (TokenResponse);
+
   rpc Login(Credentials) returns (TokenResponse);
+
   rpc SaveCredentials(SaveCredsRequest) returns (None);
+
   rpc GetUserAllCredentials(GetCredsRequest) returns (UserCredsResponse);
-  rpc UploadBigData(stream UploadRequest) returns (UploadResponse);
+
+  rpc UploadBigData(stream BigDataChunk) returns (UploadResponse);
+
+  rpc DownloadBigData(DownloadRequest) returns (stream BigDataChunk);
 } 

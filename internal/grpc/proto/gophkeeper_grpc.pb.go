@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.3
-// source: proto/gophkeeper.proto
+// source: gophkeeper.proto
 
 package proto
 
@@ -19,24 +19,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Gophkeeper_CheckConnection_FullMethodName       = "/gophkeeper.Gophkeeper/CheckConnection"
 	Gophkeeper_Register_FullMethodName              = "/gophkeeper.Gophkeeper/Register"
 	Gophkeeper_Login_FullMethodName                 = "/gophkeeper.Gophkeeper/Login"
 	Gophkeeper_SaveCredentials_FullMethodName       = "/gophkeeper.Gophkeeper/SaveCredentials"
 	Gophkeeper_GetUserAllCredentials_FullMethodName = "/gophkeeper.Gophkeeper/GetUserAllCredentials"
 	Gophkeeper_UploadBigData_FullMethodName         = "/gophkeeper.Gophkeeper/UploadBigData"
+	Gophkeeper_DownloadBigData_FullMethodName       = "/gophkeeper.Gophkeeper/DownloadBigData"
 )
 
 // GophkeeperClient is the client API for Gophkeeper service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GophkeeperClient interface {
-	CheckConnection(ctx context.Context, in *Hello, opts ...grpc.CallOption) (*HelloResponse, error)
 	Register(ctx context.Context, in *Credentials, opts ...grpc.CallOption) (*TokenResponse, error)
 	Login(ctx context.Context, in *Credentials, opts ...grpc.CallOption) (*TokenResponse, error)
 	SaveCredentials(ctx context.Context, in *SaveCredsRequest, opts ...grpc.CallOption) (*None, error)
 	GetUserAllCredentials(ctx context.Context, in *GetCredsRequest, opts ...grpc.CallOption) (*UserCredsResponse, error)
-	UploadBigData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadRequest, UploadResponse], error)
+	UploadBigData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BigDataChunk, UploadResponse], error)
+	DownloadBigData(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BigDataChunk], error)
 }
 
 type gophkeeperClient struct {
@@ -45,16 +45,6 @@ type gophkeeperClient struct {
 
 func NewGophkeeperClient(cc grpc.ClientConnInterface) GophkeeperClient {
 	return &gophkeeperClient{cc}
-}
-
-func (c *gophkeeperClient) CheckConnection(ctx context.Context, in *Hello, opts ...grpc.CallOption) (*HelloResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HelloResponse)
-	err := c.cc.Invoke(ctx, Gophkeeper_CheckConnection_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *gophkeeperClient) Register(ctx context.Context, in *Credentials, opts ...grpc.CallOption) (*TokenResponse, error) {
@@ -97,29 +87,48 @@ func (c *gophkeeperClient) GetUserAllCredentials(ctx context.Context, in *GetCre
 	return out, nil
 }
 
-func (c *gophkeeperClient) UploadBigData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadRequest, UploadResponse], error) {
+func (c *gophkeeperClient) UploadBigData(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BigDataChunk, UploadResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Gophkeeper_ServiceDesc.Streams[0], Gophkeeper_UploadBigData_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[UploadRequest, UploadResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[BigDataChunk, UploadResponse]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Gophkeeper_UploadBigDataClient = grpc.ClientStreamingClient[UploadRequest, UploadResponse]
+type Gophkeeper_UploadBigDataClient = grpc.ClientStreamingClient[BigDataChunk, UploadResponse]
+
+func (c *gophkeeperClient) DownloadBigData(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BigDataChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Gophkeeper_ServiceDesc.Streams[1], Gophkeeper_DownloadBigData_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadRequest, BigDataChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Gophkeeper_DownloadBigDataClient = grpc.ServerStreamingClient[BigDataChunk]
 
 // GophkeeperServer is the server API for Gophkeeper service.
 // All implementations must embed UnimplementedGophkeeperServer
 // for forward compatibility.
 type GophkeeperServer interface {
-	CheckConnection(context.Context, *Hello) (*HelloResponse, error)
 	Register(context.Context, *Credentials) (*TokenResponse, error)
 	Login(context.Context, *Credentials) (*TokenResponse, error)
 	SaveCredentials(context.Context, *SaveCredsRequest) (*None, error)
 	GetUserAllCredentials(context.Context, *GetCredsRequest) (*UserCredsResponse, error)
-	UploadBigData(grpc.ClientStreamingServer[UploadRequest, UploadResponse]) error
+	UploadBigData(grpc.ClientStreamingServer[BigDataChunk, UploadResponse]) error
+	DownloadBigData(*DownloadRequest, grpc.ServerStreamingServer[BigDataChunk]) error
 	mustEmbedUnimplementedGophkeeperServer()
 }
 
@@ -130,9 +139,6 @@ type GophkeeperServer interface {
 // pointer dereference when methods are called.
 type UnimplementedGophkeeperServer struct{}
 
-func (UnimplementedGophkeeperServer) CheckConnection(context.Context, *Hello) (*HelloResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CheckConnection not implemented")
-}
 func (UnimplementedGophkeeperServer) Register(context.Context, *Credentials) (*TokenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
 }
@@ -145,8 +151,11 @@ func (UnimplementedGophkeeperServer) SaveCredentials(context.Context, *SaveCreds
 func (UnimplementedGophkeeperServer) GetUserAllCredentials(context.Context, *GetCredsRequest) (*UserCredsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetUserAllCredentials not implemented")
 }
-func (UnimplementedGophkeeperServer) UploadBigData(grpc.ClientStreamingServer[UploadRequest, UploadResponse]) error {
+func (UnimplementedGophkeeperServer) UploadBigData(grpc.ClientStreamingServer[BigDataChunk, UploadResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method UploadBigData not implemented")
+}
+func (UnimplementedGophkeeperServer) DownloadBigData(*DownloadRequest, grpc.ServerStreamingServer[BigDataChunk]) error {
+	return status.Errorf(codes.Unimplemented, "method DownloadBigData not implemented")
 }
 func (UnimplementedGophkeeperServer) mustEmbedUnimplementedGophkeeperServer() {}
 func (UnimplementedGophkeeperServer) testEmbeddedByValue()                    {}
@@ -167,24 +176,6 @@ func RegisterGophkeeperServer(s grpc.ServiceRegistrar, srv GophkeeperServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Gophkeeper_ServiceDesc, srv)
-}
-
-func _Gophkeeper_CheckConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Hello)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(GophkeeperServer).CheckConnection(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Gophkeeper_CheckConnection_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GophkeeperServer).CheckConnection(ctx, req.(*Hello))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Gophkeeper_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -260,11 +251,22 @@ func _Gophkeeper_GetUserAllCredentials_Handler(srv interface{}, ctx context.Cont
 }
 
 func _Gophkeeper_UploadBigData_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(GophkeeperServer).UploadBigData(&grpc.GenericServerStream[UploadRequest, UploadResponse]{ServerStream: stream})
+	return srv.(GophkeeperServer).UploadBigData(&grpc.GenericServerStream[BigDataChunk, UploadResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Gophkeeper_UploadBigDataServer = grpc.ClientStreamingServer[UploadRequest, UploadResponse]
+type Gophkeeper_UploadBigDataServer = grpc.ClientStreamingServer[BigDataChunk, UploadResponse]
+
+func _Gophkeeper_DownloadBigData_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(GophkeeperServer).DownloadBigData(m, &grpc.GenericServerStream[DownloadRequest, BigDataChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Gophkeeper_DownloadBigDataServer = grpc.ServerStreamingServer[BigDataChunk]
 
 // Gophkeeper_ServiceDesc is the grpc.ServiceDesc for Gophkeeper service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -273,10 +275,6 @@ var Gophkeeper_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "gophkeeper.Gophkeeper",
 	HandlerType: (*GophkeeperServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "CheckConnection",
-			Handler:    _Gophkeeper_CheckConnection_Handler,
-		},
 		{
 			MethodName: "Register",
 			Handler:    _Gophkeeper_Register_Handler,
@@ -300,6 +298,11 @@ var Gophkeeper_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _Gophkeeper_UploadBigData_Handler,
 			ClientStreams: true,
 		},
+		{
+			StreamName:    "DownloadBigData",
+			Handler:       _Gophkeeper_DownloadBigData_Handler,
+			ServerStreams: true,
+		},
 	},
-	Metadata: "proto/gophkeeper.proto",
+	Metadata: "gophkeeper.proto",
 }

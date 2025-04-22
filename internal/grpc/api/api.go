@@ -24,7 +24,9 @@ type IGophKeeperCore interface {
 	UserLogin(ctx context.Context, cr gophkeeper.Credentials) (string, error)
 	SaveCredentials(ctx context.Context, userID uuid.UUID, in gophkeeper.CredentialsStorage) error
 	GetAllUserCredentials(ctx context.Context, userID uuid.UUID, password string) (gophkeeper.AllUserCredentials,error)
-	CreateGridFSStream(userID string, filename, metainfo string)(*gridfs.UploadStream, error)
+	CreateGridFSStream(userID string, filename, metainfo string, size int64)(*gridfs.UploadStream, error)
+	GetFileMetadata(ctx context.Context, userID uuid.UUID, filename string) (*gophkeeper.FileInfo, error)
+	CreateDownloadStream(fileID primitive.ObjectID) (*gridfs.DownloadStream, error)
 }
 
 type Server struct {
@@ -108,7 +110,7 @@ func (s *Server) SaveCredentials(ctx context.Context, in *pb.SaveCredsRequest)(*
 			MetaInfo: in.Metainfo,
 			Marking: in.Marking,
 		},
-		Password: in.Password,
+		Password: in.Encrpassword,
 	})
 	if err!=nil{
 		if errors.Is(err, gopherror.ErrAlreadyExists) {
@@ -181,7 +183,7 @@ func (s *Server) UploadBigData(stream pb.Gophkeeper_UploadBigDataServer) error {
 	}
 
 	// Подключаемся к GridFS
-	uploadStream, err:=s.Core.CreateGridFSStream(userID.String(), metadata.Filename, metadata.Metainfo)
+	uploadStream, err:=s.Core.CreateGridFSStream(userID.String(), metadata.Filename, metadata.Metainfo, metadata.Size)
 	if err!=nil{
 		return status.Errorf(codes.Internal, "Fail to create GridFS stream %v", err.Error())
 	}
@@ -217,4 +219,60 @@ func (s *Server) UploadBigData(stream pb.Gophkeeper_UploadBigDataServer) error {
 		Size:   totalSize,
 		Status: "success",
 	})
+}
+
+func (s *Server) DownloadBigData(in *pb.DownloadRequest, stream pb.Gophkeeper_DownloadBigDataServer) error {
+	userID, err:=authenticator.ExtractUserIDFromCtx(stream.Context())
+	if err!=nil{
+		return status.Errorf(codes.Internal, "Fail while getting user id from context")
+	}
+
+	fileInfo, err:=s.Core.GetFileMetadata(stream.Context(),userID, in.Filename)
+	if err!=nil{
+		if err == gopherror.ErrNoData {
+			return status.Error(codes.NotFound, "data with specified name not found")
+		}
+		return status.Errorf(codes.Internal, "database error: %v", err)
+	}
+
+	// Отправляем метаданные первым сообщением
+	if err := stream.Send(&pb.BigDataChunk{
+		Data: &pb.BigDataChunk_Metadata{
+			Metadata: &pb.FileMetadata{
+				Filename:    in.Filename,
+				Metainfo: fileInfo.Metadata,
+				Size: fileInfo.Size,
+			},
+		},
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to send metadata: %v", err)
+	}
+
+	downloadStream, err:=s.Core.CreateDownloadStream(fileInfo.ID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to open stream: %v", err)
+	}
+	defer downloadStream.Close()
+
+	// Отправляем чанки файла
+	buffer := make([]byte, 1<<20) // 1 MB chunks
+	for {
+		n, err := downloadStream.Read(buffer)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return status.Errorf(codes.Internal, "read error: %v", err)
+		}
+
+		if err := stream.Send(&pb.BigDataChunk{
+			Data: &pb.BigDataChunk_Chunk{
+				Chunk: buffer[:n],
+			},
+		}); err != nil {
+			return status.Errorf(codes.Internal, "send error: %v", err)
+		}
+	}
+
+	return nil
 }

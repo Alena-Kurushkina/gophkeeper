@@ -1,25 +1,51 @@
-# openssl genrsa -out ca.key 4096
-# openssl req -new -x509 -days 365 -key ca.key -out ca.crt
+.PHONY: build
 
-# # server
-# openssl genrsa -out server.key 4096
-# openssl req -new -key server.key -out server.csr -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1"
-# openssl x509 -req -days 365 -in server.csr -CA ca.crt -CAkey ca.key -set_serial 01 -out server.crt -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1")
+default-mac: mongodb certs generate-secret build-mac
 
-# # client
-# openssl genrsa -out client.key 4096
-# openssl req -new -key client.key -out client.csr -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1"
-# openssl x509 -req -days 365 -in client.csr -CA ca.crt -CAkey ca.key -set_serial 02 -out client.crt -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1")
+default-win: mongodb certs generate-secret build-win
 
+default-linux: mongodb certs generate-secret build-linux
 
-protoc --go_out=./internal/grpc --go_opt=paths=source_relative --go-grpc_out=./internal/grpc --go-grpc_opt=paths=source_relative proto/gophkeeper.proto
+BUILD_VERSION=1.0.0
+BUILD_DIR=./cmd/bin
+BINARY_NAME=gophkeeper-server
 
-# cd /Users/alena/app/tls/practicum_gophkeeper_certs
+GOPHKEEPER_SERVER_ADDRESS=:50051
 
-brew install mkcert  # macOS
-mkcert -install
-mkcert localhost 127.0.0.1 ::1
+DATABASE_PORT=27017
+GOPHKEEPER_DATABASE_DSN=mongodb://localhost:$(DATABASE_PORT)
+GOPHKEEPER_DATABASE_NAME=gophkeeper
+DOCKER_CONTAINER_DB_NAME=test-mongo
 
-# add env var for cert path and cert key path
+mongodb:
+	docker pull mongo
+	docker run -d -p $(DATABASE_PORT):$(DATABASE_PORT) --name $(DOCKER_CONTAINER_DB_NAME) mongo:latest
 
-mockgen -destination=internal/grpc/api/mock_store.go -source=internal/gophkeeper/core.go Storager
+GOPHKEEPER_CERT_PATH=/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2.pem
+GOPHKEEPER_CERT_KEY_PATH=/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2-key.pem
+
+certs:
+	brew install mkcert  # macOS
+	mkcert -install
+	mkcert -cert-file $(GOPHKEEPER_CERT_PATH) -key-file $(GOPHKEEPER_CERT_KEY_PATH) localhost 127.0.0.1 ::1
+
+generate-secret:
+	@echo "Выполните ЭТУ команду для установки переменной в текущей сессии:"
+	@echo "eval \$$(make exportsecret)"
+
+exportsecret:
+	@openssl rand -base64 32 | sed 's/+/-/g; s/\//_/g; s/=//g' | xargs -I {} echo 'export GOPHKEEPER_TOKEN_KEY="{}"'
+	@openssl rand -base64 32 | sed 's/+/-/g; s/\//_/g; s/=//g' | xargs -I {} echo 'export GOPHKEEPER_SECRET_KEY="{}"'
+
+show-secret:
+	@bash -c '[[ -z "$$GOPHKEEPER_TOKEN_KEY" ]] && echo "GOPHKEEPER_TOKEN_KEY не установлен" || echo "GOPHKEEPER_TOKEN_KEY: $$GOPHKEEPER_TOKEN_KEY"'
+	@bash -c '[[ -z "$$GOPHKEEPER_SECRET_KEY" ]] && echo "GOPHKEEPER_SECRET_KEY не установлен" || echo "GOPHKEEPER_SECRET_KEY: $$GOPHKEEPER_SECRET_KEY"'
+
+build-mac:
+	@GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.buildVersion=v$(BUILD_VERSION) -X 'main.buildDate=$$(date +'%Y/%m/%d %H:%M:%S')'" -o $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_VERSION)-darwin-arm64 ./cmd/server/main.go
+
+build-win:
+	@GOOS=windows GOARCH=amd64 go build -ldflags "-X main.buildVersion=v$(BUILD_VERSION) -X 'main.buildDate=$$(date +'%Y/%m/%d %H:%M:%S')'" -o $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_VERSION)-windows-amd64.exe ./cmd/server/main.go
+
+build-linux:
+	@GOOS=linux GOARCH=amd64 go build -ldflags "-X main.buildVersion=v$(BUILD_VERSION) -X 'main.buildDate=$$(date +'%Y/%m/%d %H:%M:%S')'" -o $(BUILD_DIR)/$(BINARY_NAME)-$(BUILD_VERSION)-linux-amd64 ./cmd/server/main.go

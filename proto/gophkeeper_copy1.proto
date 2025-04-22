@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package gophkeeper;
+
+import "google/api/annotations.proto"; 
+import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/api/field_behavior.proto";
+
+option go_package = "gophkeeper/proto";
+
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "GophKeeper API";
+    version: "1.0";
+    description: "API for password manager";
+  };
+  host: "api.example.com";
+  schemes: [HTTP, HTTPS];
+  consumes: "application/json";
+  produces: "application/json"; 
+  security_definitions: { 
+    security: {
+      key: "Bearer";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "Authorization";
+        description: "Token: Bearer";
+      };
+    };
+  };
+};
+
+
+message Hello {
+  string name = 1;
+}
+
+message HelloResponse {
+  string response = 1;
+}
+
+message Credentials {
+  string login = 1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Login";
+      example: "user-login";
+    }
+  ];
+  string password = 2 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Password";
+    }
+  ];
+}
+
+message TokenResponse {
+  string token =1;
+}
+
+message SaveCredsRequest {
+  string marking =1;
+  Credentials creds =2;
+  string encrpassword =3;  
+  string metainfo =4;
+}
+
+message GetCredsRequest {
+  string password =1 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Password for decrypt";
+    },
+    (google.api.field_behavior) = REQUIRED 
+  ];
+}
+
+message UserCredsResponse {
+  message ResponseItem {
+    string marking =1;
+    Credentials creds =2;
+    string metainfo =3;
+  }
+  repeated ResponseItem items =1;
+}
+
+message UploadRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "UploadRequest";
+      description: "Request for file upload (metadata + binary chunks)";
+    };
+  };
+  oneof data {
+    FileMetadata metadata = 1 [
+      (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+        description: "File metadata (sent first)";
+      }
+    ];
+    bytes chunk = 2 [
+      (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+        description: "Binary chunks of the file";
+        format: "byte";
+        example: "\"Ynl0ZXM=\"";
+      }
+    ];
+  }
+}
+
+message FileMetadata {
+  string filename = 1;
+  string metainfo =2;
+}
+
+message UploadResponse {
+  string status = 1;
+  int64 size = 2;
+  string file_id = 3;
+}
+
+message None{}
+
+service Gophkeeper {
+  rpc Register(Credentials) returns (TokenResponse){
+    option (google.api.http) = {
+      post: "/v1/users/register"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Register";
+      description: "Register";
+      tags: ["Users"];
+    };
+  };
+
+  rpc Login(Credentials) returns (TokenResponse){
+    option (google.api.http) = {
+      post: "/v1/users/login"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Auth";
+      description: "Auth";
+      tags: ["Users"];
+    };
+  };
+
+  rpc SaveCredentials(SaveCredsRequest) returns (None) {
+    option (google.api.http) = {
+      post: "/v1/creds"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Save";
+      description: "Save";
+      tags: ["Credentials"];
+      security: {
+        security_requirement: [
+          { 
+            key: "Bearer";
+            value: {};
+          }
+        ];
+      };
+    };
+  };
+
+  rpc GetUserAllCredentials(GetCredsRequest) returns (UserCredsResponse) {
+    option (google.api.http) = {
+      get: "/v1/creds"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get";
+      description: "Get";
+      tags: ["Credentials"];
+      security: {
+        security_requirement: [
+          { 
+            key: "Bearer";
+            value: {};
+          }
+        ];
+      };
+    };
+  };
+
+  rpc UploadBigData(stream UploadRequest) returns (UploadResponse){
+    option (google.api.http) = {
+      post: "/v1/data"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Save";
+      description: "Save";
+      tags: ["Data"];
+      security: {
+        security_requirement: [
+          { 
+            key: "Bearer";
+            value: {};
+          }
+        ];
+      };
+    };
+  };
+} 

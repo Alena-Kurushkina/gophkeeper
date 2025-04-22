@@ -5,86 +5,73 @@
 package config
 
 import (
-	"crypto/rand"
 	"flag"
 	"os"
-	"sync"
 )
 
 // A Config serves all configuration variables.
 type Config struct {
 	ServerAddress string
 	ConnectionStr string
-	DBName string
+	DBName        string
 	SecretKey     []byte
-	TokenKey      string
+	TokenKey      []byte
 	CertPath      string
 	CertKeyPath   string
 }
 
-var (
-	cfg  *Config
-	once sync.Once
-)
-
 // InitConfig initialize configuration variables from flags values and environment variables.
 func InitConfig() *Config {
-	once.Do(
-		func() {
-			// default values
-			cfg = &Config{}
+	cfg := &Config{}
 
-			key := make([]byte, 32) // 256-bit key
-			rand.Read(key)
-			cfg.SecretKey = key
+	// get flag values
+	flag.StringVar(&cfg.ServerAddress, "a", ":50051", "address of HTTP server")
+	flag.StringVar(&cfg.ConnectionStr, "d", "mongodb://localhost:27017", "connection string to database")
+	flag.StringVar(&cfg.DBName, "n", "gophkeeper", "database name")
+	flag.StringVar(&cfg.CertPath, "c", "/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2.pem", "path to certificate")
+	flag.StringVar(&cfg.CertKeyPath, "k", "/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2-key.pem", "path to certificate private key")
+	flag.Parse()
 
-			// tokenKey:=make([]byte, 32) // 256-bit key
-			// rand.Read(tokenKey)
-			// cfg.TokenKey=string(tokenKey)
+	// read environment variables
+	sa, exists := os.LookupEnv("GOPHKEEPER_SERVER_ADDRESS")
+	if exists {
+		cfg.ServerAddress = sa
+	}
 
-			// get flag values
-			flag.StringVar(&cfg.ServerAddress, "a", ":50051", "address of HTTP server")
-			flag.StringVar(&cfg.ConnectionStr, "d", "mongodb://localhost:27017", "connection string to database")
-			flag.StringVar(&cfg.DBName, "n", "gophkeeper", "database name")
-			flag.StringVar(&cfg.CertPath, "c", "/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2.pem", "path to certificate")
-			flag.StringVar(&cfg.CertKeyPath, "k", "/Users/alena/app/tls/practicum_gophkeeper_certs/localhost+2-key.pem", "path to certificate private key")
-			flag.Parse()
+	du, exists := os.LookupEnv("GOPHKEEPER_DATABASE_DSN")
+	if exists {
+		cfg.ConnectionStr = du
+	}
 
-			// read environment variables
-			sa, exists := os.LookupEnv("GOPHKEEPER_SERVER_ADDRESS")
-			if exists {
-				cfg.ServerAddress = sa
-			}
+	nu, exists := os.LookupEnv("GOPHKEEPER_DATABASE_NAME")
+	if exists {
+		cfg.DBName = nu
+	}
 
-			du, exists := os.LookupEnv("GOPHKEEPER_DATABASE_DSN")
-			if exists {
-				cfg.ConnectionStr = du
-			}
+	cu, exists := os.LookupEnv("GOPHKEEPER_CERT_PATH")
+	if exists {
+		cfg.CertPath = cu
+	}
 
-			nu, exists := os.LookupEnv("GOPHKEEPER_DATABASE_NAME")
-			if exists {
-				cfg.DBName = nu
-			}
+	ku, exists := os.LookupEnv("GOPHKEEPER_CERT_KEY_PATH")
+	if exists {
+		cfg.CertKeyPath = ku
+	}
 
-			cu, exists := os.LookupEnv("GOPHKEEPER_CERT_PATH")
-			if exists {
-				cfg.CertPath = cu
-			}
+	su, exists := os.LookupEnv("GOPHKEEPER_SECRET_KEY")
+	if exists {
+		cfg.SecretKey = []byte(su)
+	} else {
+		panic("No GOPHKEEPER_SECRET_KEY specified")
+	}
 
-			ku, exists := os.LookupEnv("GOPHKEEPER_CERT_KEY_PATH")
-			if exists {
-				cfg.CertKeyPath = ku
-			}
+	// read env var
+	tu, exists := os.LookupEnv("GOPHKEEPER_TOKEN_KEY")
+	if exists {
+		cfg.TokenKey = []byte(tu)
+	} else {
+		panic("No GOPHKEEPER_TOKEN_KEY specified")
+	}
 
-			su, exists := os.LookupEnv("GOPHKEEPER_SECRET_KEY")
-			if exists {
-				cfg.SecretKey = []byte(su)
-			}
-
-			tu, exists := os.LookupEnv("GOPHKEEPER_TOKEN_KEY")
-			if exists {
-				cfg.TokenKey = tu
-			}
-		})
 	return cfg
 }

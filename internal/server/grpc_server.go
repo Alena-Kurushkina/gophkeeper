@@ -32,13 +32,17 @@ func CreateServer(cfg *config.Config, core *gophkeeper.GophKeeperCore, idleConns
 	authenticator.TargetMethods["/gophkeeper.Gophkeeper/Register"]=false
 	authenticator.TargetMethods["/gophkeeper.Gophkeeper/Login"]=false
 
+	th:=authenticator.NewTokenHelper(cfg.TokenKey)
+	authInterc:=th.GRPCAuthInterceptor()
+	authStreamInterc:=th.GRPCStreamAuthInterceptor()
+
 	chain := ChainUnaryInterceptors(
-		authenticator.GRPCAuthInterceptor,
+		authInterc,
 		logger.GRPCLogInterceptor,
 	)
 
 	streamChain := ChainStreamInterceptors(
-        authenticator.GRPCStreamAuthInterceptor,
+        authStreamInterc,
         logger.GRPCStreamLogInterceptor,
     )
 
@@ -66,6 +70,10 @@ func (s *GophKeeperServer) Run(){
 	if err != nil {
 		logger.Log.Fatalf("failed to listen: %v", err)
 	}
+
+	logger.Log.Infof("Certificate path: %s", s.config.CertPath)
+	logger.Log.Infof("Certificate key path: %s", s.config.CertKeyPath)
+	logger.Log.Infof("Database connection: %s", s.config.ConnectionStr)
 
 	logger.Log.Infof("Server is starting on %s", s.config.ServerAddress)
 	if err := s.Server.Serve(lis); err != nil {

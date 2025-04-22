@@ -18,13 +18,11 @@ import (
 var (
 	buildVersion string = "N/A"
 	buildDate    string = "N/A"
-	buildCommit  string = "N/A"
 )
 
 func main() {
     fmt.Printf("Build version: %s\n", buildVersion)
 	fmt.Printf("Build date: %s\n", buildDate)
-	fmt.Printf("Build commit: %s\n", buildCommit)
     
     logger.MustInitialize()
     defer logger.Log.Sync()
@@ -38,7 +36,13 @@ func main() {
     // через канал сообщаем основному потоку, что все сетевые соединения обработаны и закрыты
 	idleConnsClosed := make(chan struct{})
 
-    core:=gophkeeper.NewGophKeeperCore(db, cfg)
+	core:=&gophkeeper.GophKeeperCore{
+		DB: db,
+		UserCore: gophkeeper.NewUserCore(db, cfg.TokenKey),
+		CredentialsCore: gophkeeper.NewCredentialsCore(db),
+		GridFSCore: gophkeeper.NewGridFSCore(db),
+	}
+    //core:=gophkeeper.NewGophKeeperCore(db)
 
     srv:=server.CreateServer(cfg, core, idleConnsClosed)
 

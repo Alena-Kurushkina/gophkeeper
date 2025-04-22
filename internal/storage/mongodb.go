@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/Alena-Kurushkina/gophkeeper/internal/config"
@@ -25,14 +24,14 @@ type Database struct {
 const (
 	collectionUsers = "users"
 	collectionCredentials = "credentials"
+	collectionFiles = "files"
 )
 
 func MustCreate(ctx context.Context, cfg *config.Config) *Database {
 	ctxTO, cancel:= context.WithTimeout(ctx, 10*time.Second)
-	//TODO: ???
 	defer cancel()
 
-	// Подключение к MongoDB
+	// connect to mogodb
 	client, err := mongo.Connect(ctxTO, options.Client().ApplyURI(cfg.ConnectionStr))
 	if err != nil {
 		logger.Log.Fatalf("Failed to connect to DB:",err)
@@ -40,19 +39,30 @@ func MustCreate(ctx context.Context, cfg *config.Config) *Database {
 
 	db:=client.Database(cfg.DBName)
 
-	//TODO: вынести в отдельную функцию
+	// create collections
+	err=createCollections(db)
+	if err!=nil{
+		logger.Log.Fatalf("error creating collections", err)
+	}
+
+	return &Database{
+		client: client,
+		database: db,
+	}
+}
+
+func createCollections(db *mongo.Database) error {
 	// create collections
 	colUsers:=db.Collection(collectionUsers)
 	indexModel := mongo.IndexModel{
 		Keys:    bson.D{{Key: "login", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
-	_, err = colUsers.Indexes().CreateOne(context.Background(), indexModel)
+	_, err := colUsers.Indexes().CreateOne(context.Background(), indexModel)
 	if err != nil {
-		log.Fatal("Failed to create index:", err)
+		return fmt.Errorf("failed to create index: %w", err)
 	}
 
-	//TODO: нужно ли поле id
 	colCreds:=db.Collection(collectionCredentials)
 	indexModelCr := mongo.IndexModel{
 		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "user_id", Value: 1}},
@@ -60,14 +70,10 @@ func MustCreate(ctx context.Context, cfg *config.Config) *Database {
 	}
 	_, err = colCreds.Indexes().CreateOne(context.Background(), indexModelCr)
 	if err != nil {
-		log.Fatal("Failed to create index: ", err)
+		return fmt.Errorf("failed to create index: %w", err)
 	}
 
-
-	return &Database{
-		client: client,
-		database: db,
-	}
+	return nil
 }
 
 func (d *Database) Shutdown(ctx context.Context){
@@ -143,7 +149,7 @@ func(d *Database) SaveUserCredentials(
 	return nil
 }
 
-func(d *Database) GetUserCredentials(ctx context.Context, userID primitive.Binary) ([]CredentialsDocument, error){
+func(d *Database) GetUserCredentials(ctx context.Context, userID primitive.Binary) ([]*CredentialsDocument, error){
 	collection := d.database.Collection(collectionCredentials)
 
 	filter := bson.M{"user_id": userID}
@@ -153,7 +159,7 @@ func(d *Database) GetUserCredentials(ctx context.Context, userID primitive.Binar
 	}
 	defer cursor.Close(ctx)
 
-	var creds []CredentialsDocument
+	var creds []*CredentialsDocument
 	if err = cursor.All(context.TODO(), &creds); err != nil {
 		return nil, err
 	}
@@ -165,11 +171,11 @@ func(d *Database) GetUserCredentials(ctx context.Context, userID primitive.Binar
 	return creds, nil
 }
 
-func(d *Database) CreateGridFSStream(userID string, filename string, metainfo string) (*gridfs.UploadStream, error) {
+func(d *Database) CreateGridFSStream(userID string, filename string, metainfo string, size int64) (*gridfs.UploadStream, error) {
 	// Подключаемся к GridFS
 	bucket, err := gridfs.NewBucket(
 		d.database,
-		options.GridFSBucket().SetName("files"),
+		options.GridFSBucket().SetName(collectionFiles),
 	)
 	if err != nil {
 		return nil,err
@@ -180,6 +186,7 @@ func(d *Database) CreateGridFSStream(userID string, filename string, metainfo st
 		SetMetadata(bson.M{
 			"user_id":   userID,
 			"metainfo": metainfo,
+			"size": size,
 		})
 
 	uploadStream, err := bucket.OpenUploadStream(filename, opts)
@@ -188,6 +195,38 @@ func(d *Database) CreateGridFSStream(userID string, filename string, metainfo st
 	}
 
 	return uploadStream, nil
+}
+
+func(d *Database) GetFileMetadata(ctx context.Context, userID, filename string) (*FileInfo, error) {
+	// Ищем файл в GridFS
+	filter := bson.M{
+		"metadata.user_id": userID,
+		"filename": filename,
+	}
+
+	var fileInfo FileInfo
+
+	err := d.database.Collection("files."+collectionFiles).FindOne(ctx, filter).Decode(&fileInfo)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, gopherror.ErrNoData
+		}
+		return nil, err
+	}
+
+	return &fileInfo, nil
+}
+
+func(d *Database) CreateDownloadStream(fileID primitive.ObjectID)(*gridfs.DownloadStream, error) {
+	// Открываем поток для чтения файла
+	bucket, _ := gridfs.NewBucket(d.database,
+		options.GridFSBucket().SetName("files"), // Указываем имя бакета
+	)
+	downloadStream, err := bucket.OpenDownloadStream(fileID)
+	if err != nil {
+		return nil, err
+	}
+	return downloadStream, nil
 }
 
 

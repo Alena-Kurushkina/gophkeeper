@@ -2,9 +2,7 @@ package authenticator
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -20,37 +18,35 @@ import (
 
 const tokenExp = time.Hour * 3
 
-type Claims struct {
-	jwt.RegisteredClaims
-	UserID uuid.UUID
-}
+type (
+	Claims struct {
+		jwt.RegisteredClaims
+		UserID uuid.UUID
+	}
+	userUUID string
+)
 
-type userUUID string
 var (
 	UserUUIDKey userUUID = "userUUID"
-	TokenKey []byte
 	TargetMethods map[string]bool
 )
 
 func init(){
-	// default value
-	TokenKey=make([]byte, 32) // 256-bit key
-	_, err:=rand.Read(TokenKey)
-	if err!=nil{
-		panic(err)
-	}
-
-	// read env var
-	tu, exists := os.LookupEnv("GOPHKEEPER_TOKEN_KEY")
-	if exists {
-		TokenKey = []byte(tu)
-	}
-
 	TargetMethods=make(map[string]bool)
 }
 
+type TokenHelper struct{
+	tokenKey []byte
+}
+
+func NewTokenHelper(key []byte) *TokenHelper{
+	return &TokenHelper{
+		tokenKey: key,
+	}
+}
+
 // BuildJWTString makes token and returns it as a string.
-func BuildJWTString(id uuid.UUID) (string, error) {
+func(h *TokenHelper) BuildJWTString(id uuid.UUID) (string, error) {
 	// создаём новый токен с алгоритмом подписи HS256 и утверждениями — Claims
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -62,7 +58,7 @@ func BuildJWTString(id uuid.UUID) (string, error) {
 	})
 
 	// создаём строку токена
-	tokenString, err := token.SignedString(TokenKey)
+	tokenString, err := token.SignedString(h.tokenKey)
 	if err != nil {
 		return "", err
 	}
@@ -71,81 +67,106 @@ func BuildJWTString(id uuid.UUID) (string, error) {
 	return tokenString, nil
 }
 
-// GRPCAuthInterceptor realises gRPC interceptor for user authentication.
-// It try to get user UUID from context.
-func GRPCAuthInterceptor(ctx context.Context,req any,info *grpc.UnaryServerInfo,handler grpc.UnaryHandler) (interface{}, error) {
-	// filter grpc methods that need authorization
-	if applyed, exists:=TargetMethods[info.FullMethod]; exists && !applyed{
-		return handler(ctx, req)
-	}
-
-	var token string
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		values := md.Get("token")
-		if len(values) > 0 {
-			token = values[0]
-		}
-	}
-	if len(token) == 0 {
-		logger.Log.Infof("No token in request")
-		return nil, status.Error(codes.Unauthenticated, "No token in request")
-	}
-
-	userID, err := getUserID(token)
+func(h *TokenHelper) getUserID(tokenString string) (uuid.UUID, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims,
+		func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+			return []byte(h.tokenKey), nil
+		})
 	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, err.Error())		
+		v, _ := err.(*jwt.ValidationError)
+		if v.Errors == jwt.ValidationErrorExpired || v.Errors == jwt.ValidationErrorSignatureInvalid {
+			return uuid.Nil, gopherror.ErrTokenInvalid
+		}
+		return uuid.Nil, err
 	}
-
-	ctx = context.WithValue(ctx, UserUUIDKey, userID.String())
-	logger.Log.Infof("Got user id %s from token", userID)
-
-	return handler(ctx, req)
+	if !token.Valid {
+		return uuid.Nil, gopherror.ErrTokenInvalid
+	}
+	if claims.UserID == uuid.Nil {
+		return uuid.Nil, gopherror.ErrNoUserIDInToken
+	}
+	logger.Log.Infof("User token is valid")
+	return claims.UserID, nil
 }
 
-func GRPCStreamAuthInterceptor(
-    srv interface{},
-    ss grpc.ServerStream,
-    info *grpc.StreamServerInfo,
-    handler grpc.StreamHandler,
-) error {
-	// фильтруем grpc методы которым не нужна авторизация
-	if applyed, exists:=TargetMethods[info.FullMethod]; exists && !applyed{
-		return handler(srv, ss)
-	}
-
-	// создаем обертку вокруг ServerStream
-   // wrappedStream := &wrappedServerStream{ss, ss.Context()}
-
-	var token string
-	if md, ok := metadata.FromIncomingContext(ss.Context()); ok {
-		values := md.Get("token")
-		if len(values) > 0 {
-			token = values[0]
+// GRPCAuthInterceptor realises gRPC interceptor for user authentication.
+// It try to get user UUID from context.
+func(h *TokenHelper) GRPCAuthInterceptor() grpc.UnaryServerInterceptor {
+	return func (ctx context.Context,req any,info *grpc.UnaryServerInfo,handler grpc.UnaryHandler) (interface{},error) {
+		// filter grpc methods that need authorization
+		if applyed, exists:=TargetMethods[info.FullMethod]; exists && !applyed{
+			return handler(ctx, req)
 		}
-	}
-	if len(token) == 0 {
-		logger.Log.Infof("No token in request")
-		return status.Error(codes.Unauthenticated, "No token in request")
-	}
 
-	userID, err := getUserID(token)
-	if err != nil {
-		return status.Error(codes.Unauthenticated, err.Error())		
+		var token string
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			values := md.Get("token")
+			if len(values) > 0 {
+				token = values[0]
+			}
+		}
+		if len(token) == 0 {
+			logger.Log.Infof("No token in request")
+			return nil, status.Error(codes.Unauthenticated, "No token in request")
+		}
+
+		userID, err := h.getUserID(token)
+		if err != nil {
+			return nil, status.Error(codes.Unauthenticated, err.Error())		
+		}
+
+		ctx = context.WithValue(ctx, UserUUIDKey, userID.String())
+		logger.Log.Infof("Got user id %s from token", userID)
+
+		return handler(ctx, req)
 	}
+}
 
-	//ctx := context.WithValue(context.TODO(), UserUUIDKey, userID.String())
-	logger.Log.Infof("Got user id %s from token", userID.String())
+func (h *TokenHelper) GRPCStreamAuthInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		// фильтруем grpc методы которым не нужна авторизация
+		if applyed, exists:=TargetMethods[info.FullMethod]; exists && !applyed{
+			return handler(srv, ss)
+		}
 
-	// Добавляем user_id в контекст
-    newCtx := context.WithValue(ss.Context(), UserUUIDKey, userID.String())
-    
-	// Обертка для ServerStream с новым контекстом
-	wrappedStream := &wrappedServerStream{
-		ServerStream: ss,
-		ctx: newCtx,
+		// создаем обертку вокруг ServerStream
+		// wrappedStream := &wrappedServerStream{ss, ss.Context()}
+
+		var token string
+		if md, ok := metadata.FromIncomingContext(ss.Context()); ok {
+			values := md.Get("token")
+			if len(values) > 0 {
+				token = values[0]
+			}
+		}
+		if len(token) == 0 {
+			logger.Log.Infof("No token in request")
+			return status.Error(codes.Unauthenticated, "No token in request")
+		}
+
+		userID, err := h.getUserID(token)
+		if err != nil {
+			return status.Error(codes.Unauthenticated, err.Error())		
+		}
+
+		//ctx := context.WithValue(context.TODO(), UserUUIDKey, userID.String())
+		logger.Log.Infof("Got user id %s from token", userID.String())
+
+		// Добавляем user_id в контекст
+		newCtx := context.WithValue(ss.Context(), UserUUIDKey, userID.String())
+		
+		// Обертка для ServerStream с новым контекстом
+		wrappedStream := &wrappedServerStream{
+			ServerStream: ss,
+			ctx: newCtx,
+		}
+
+		return handler(srv, wrappedStream)
 	}
-
-	return handler(srv, wrappedStream)
 }
 
 // Обертка для ServerStream с переопределением контекста
@@ -164,32 +185,6 @@ func (w *wrappedServerStream) RecvMsg(m interface{}) error {
 
 func (w *wrappedServerStream) SendMsg(m interface{}) error {
     return w.ServerStream.SendMsg(m)
-}
-
-func getUserID(tokenString string) (uuid.UUID, error) {
-	claims := &Claims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims,
-		func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-			}
-			return []byte(TokenKey), nil
-		})
-	if err != nil {
-		v, _ := err.(*jwt.ValidationError)
-		if v.Errors == jwt.ValidationErrorExpired || v.Errors == jwt.ValidationErrorSignatureInvalid {
-			return uuid.Nil, gopherror.ErrTokenInvalid
-		}
-		return uuid.Nil, err
-	}
-	if !token.Valid {
-		return uuid.Nil, gopherror.ErrTokenInvalid
-	}
-	if claims.UserID == uuid.Nil {
-		return uuid.Nil, gopherror.ErrNoUserIDInToken
-	}
-	logger.Log.Infof("User token is valid")
-	return claims.UserID, nil
 }
 
 func ExtractUserIDFromCtx(ctx context.Context) (uuid.UUID, error) {

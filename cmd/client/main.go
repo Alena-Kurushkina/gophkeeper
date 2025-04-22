@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -41,6 +40,5 @@ func main() {
 	p := tea.NewProgram(client.InitialModel(cl))
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("Ошибка запуска программы: %v\n", err)
-		os.Exit(1)
 	}
 }

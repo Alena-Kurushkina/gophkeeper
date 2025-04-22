@@ -1,0 +1,139 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "gophkeeper.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "Gophkeeper"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {},
+  "definitions": {
+    "UserCredsResponseResponseItem": {
+      "type": "object",
+      "properties": {
+        "marking": {
+          "type": "string"
+        },
+        "creds": {
+          "$ref": "#/definitions/gophkeeperCredentials"
+        },
+        "metainfo": {
+          "type": "string"
+        }
+      }
+    },
+    "gophkeeperBigDataChunk": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "$ref": "#/definitions/gophkeeperFileMetadata"
+        },
+        "chunk": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "gophkeeperCredentials": {
+      "type": "object",
+      "properties": {
+        "login": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      }
+    },
+    "gophkeeperFileMetadata": {
+      "type": "object",
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "metainfo": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "gophkeeperNone": {
+      "type": "object"
+    },
+    "gophkeeperTokenResponse": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        }
+      }
+    },
+    "gophkeeperUploadResponse": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string",
+          "format": "int64"
+        },
+        "fileId": {
+          "type": "string"
+        }
+      }
+    },
+    "gophkeeperUserCredsResponse": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/UserCredsResponseResponseItem"
+          }
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  }
+}
